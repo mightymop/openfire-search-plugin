@@ -4,9 +4,9 @@
     <class>org.jivesoftware.openfire.plugin.SearchPlugin</class>
     <name>Search</name>
     <description>Provides support for Jabber Search (XEP-0055)</description>
-    <author>Ryan Graham</author>
+    <author>PK Darius Dir ZS IKT PG MIKT</author>
     <version>${project.version}</version>
-    <date>09/25/2019</date>
+    <date>19/12/2019</date>
     <minServerVersion>4.1.1</minServerVersion>
     <minJavaVersion>1.8</minJavaVersion>
 

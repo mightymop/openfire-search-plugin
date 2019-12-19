@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
@@ -29,6 +30,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
 
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
@@ -38,9 +42,12 @@ import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 
+import org.dom4j.Document;
+import org.dom4j.DocumentException;
 import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
 import org.dom4j.QName;
+import org.jivesoftware.openfire.SessionManager;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.openfire.container.PluginManager;
@@ -50,8 +57,14 @@ import org.jivesoftware.openfire.disco.IQDiscoItemsHandler;
 import org.jivesoftware.openfire.group.Group;
 import org.jivesoftware.openfire.group.GroupManager;
 import org.jivesoftware.openfire.ldap.LdapManager;
+import org.jivesoftware.openfire.pep.PEPService;
+import org.jivesoftware.openfire.pep.PEPServiceManager;
+import org.jivesoftware.openfire.pubsub.Node;
+import org.jivesoftware.openfire.pubsub.PublishedItem;
+import org.jivesoftware.openfire.session.ClientSession;
 import org.jivesoftware.openfire.user.User;
 import org.jivesoftware.openfire.user.UserManager;
+import org.jivesoftware.openfire.user.UserNotFoundException;
 import org.jivesoftware.util.Base64;
 import org.jivesoftware.util.JiveGlobals;
 import org.jivesoftware.util.LocaleUtils;
@@ -141,9 +154,25 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
         fieldLookup.put("username", "Username");
         fieldLookup.put("first", "Name");
         fieldLookup.put("last", "Name");
-        fieldLookup.put("nick", "Name");
+        fieldLookup.put("nick", "Nickname");
+        fieldLookup.put("nickname", "Nickname");
         fieldLookup.put("name", "Name");
         fieldLookup.put("email", "Email");
+        
+        if (JiveGlobals.getProperty("ldap.searchFields", null)!=null)
+        {
+        	String fields = JiveGlobals.getProperty("ldap.searchFields", null);
+        	try {
+                for (StringTokenizer i=new StringTokenizer(fields, ","); i.hasMoreTokens(); ) {
+                    String[] field = i.nextToken().split("/");
+                    validSearchRequestFields.add(field[0]);
+                   // fieldLookup.put(field[0],field[1]);
+                }
+            }
+            catch (Exception e) {
+                Log.error("Error parsing LDAP search fields: " + fields, e);
+            }
+        }
     }
 
     /*
@@ -591,51 +620,310 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
             return false;
         }
 
+	boolean isx=false;
+
+	
         for (Element element : fields) {
-            final String name = element.getName();
-            if (!validSearchRequestFields.contains(name)) {
-                return false;
-            }
+		final String name = element.getName();
+		if (name.equals("x"))
+		{
+			
+			isx=true;
+			if (!isValidDataForm(element))
+			{
+				Log.info("Invalid Fields in DataForm...");
+			    	return false;
+			}
+			else
+				break;
+            	}
+	}
 
-            // TODO: check dataform validity.
-            // if (name.equals("x") && !isValidDataForm(element))
-            // {
-            // return false;
-            // }
-
-            if (name.equals("set") && !ResultSet.isValidRSMRequest(element)) {
-                return false;
-            }
-        }
+	if (!isx)
+	{
+		Log.info("Query has no Dataform...");
+		for (Element element : fields) {
+		    final String name = element.getName();
+		    if (!isx&&!validSearchRequestFields.contains(name)) {
+		        return false;
+		    }
+		   
+		    if (name.equals("set") && !ResultSet.isValidRSMRequest(element)) {
+		        return false;
+		    }
+		}
+	}
 
         return true;
     }
+
+    private static boolean isValidDataForm(Element el)
+    {
+	final List<Element> fields = el.elements();
+ 	for (Element field : fields) {
+            final String name = field.getName();
+            if (name.equals("field")&&field.attributeValue("var")!=null&&validSearchRequestFields.contains(field.attributeValue("var")))
+	    {
+                return true;
+            }           
+        }
+
+	return false;
+    }    
+    
+    class NickAddrType
+    {
+    	public String nick=null;
+    	public String addr=null;
+    	public long ctime=0;
+    	
+    	/*@Override
+    	public String toString()
+    	{
+    		return "<item nick=\""+nick+"\" jid=\""+addr+"\" time=\""+String.valueOf(mtime)+"\" />";
+    	}*/
+    }
+
+	private ArrayList<NickAddrType> getRufnamen(String searchquery)
+	{		
+		Collection<ClientSession> sessions = SessionManager.getInstance().getSessions();
+		ArrayList<NickAddrType> users = new ArrayList<NickAddrType>();
+		String addr = null;
+		
+		PEPServiceManager pepServiceMgr = XMPPServer.getInstance().getIQPEPHandler().getServiceManager();
+	              
+		for (ClientSession session : sessions) {
+			
+			addr = session.getAddress().toBareJID();
+		
+			NickAddrType nick = null;
+											
+			Node node = pepServiceMgr.getPEPService(addr).getNode("http://jabber.org/protocol/nick");
+			
+			if (node!=null)
+			{		
+				PublishedItem item = node.getPublishedItem("current");
+				if (item!=null)
+				{
+					Date creationDate = item.getCreationDate();
+					String xml = item.getPayloadXML();
+					nick = new NickAddrType();
+					
+					nick.nick = xml.replace("<nick xmlns=\"http://jabber.org/protocol/nick\">", "").replace("</nick>", "");
+					
+					if ((nick.nick.matches(".*\\d.*")||nick.nick.toLowerCase().indexOf("pgmikt")!=-1)&&nick.nick.toLowerCase().contains(searchquery.toLowerCase()))
+					{						
+						nick.addr=addr;
+						nick.ctime=creationDate.getTime();
+					
+						boolean found=false;
+						
+						for (NickAddrType tmp : users)
+						{
+							if (tmp.nick.equalsIgnoreCase(nick.nick))
+							{
+								found=true;
+								if (tmp.ctime<nick.ctime) //der andere wurde früher erstellt also updaten
+								{
+									tmp.addr=nick.addr;
+									tmp.ctime=nick.ctime;
+								}
+							}
+						}
+						
+						if (!found)
+						{	
+							users.add(nick);
+						}
+					}
+				}
+			}
+		}
+		
+		Collections.sort(users,new Comparator<NickAddrType>() {
+	
+			@Override
+			public int compare(NickAddrType arg0, NickAddrType arg1) {
+				return arg0.nick.compareToIgnoreCase(arg1.nick);
+			}
+		});
+		
+		if (users.size()>0)
+			Log.info("Ergebnis (Rufnamen): "+String.valueOf(users.size()));
+		else
+			Log.info("Ergebnis (Rufnamen): 0");
+	
+	   return users;
+	}
 
     private Set<User> performSearch(Element incomingForm, int startIndex, int max) {
         Set<User> users = new HashSet<User>();
 
         Hashtable<String, String> searchList = extractSearchQuery(incomingForm);
-
-        for (Entry<String, String> entry : searchList.entrySet()) {
+       
+        int mymax = JiveGlobals.getIntProperty("plugin.search.max_search_results_per_word", 100);
+        
+        //Log.info(incomingForm.asXML());
+        
+        for (Entry<String, String> entry : searchList.entrySet())
+        {
             String field = entry.getKey();
             String query = entry.getValue();
 
+            Log.info("FIELD: "+field+" QUERY: "+query);
+
+            if (query!=null&&!field.equals("Nickname"))
+            {
+                query=query.trim();
+                if (!query.endsWith("*"))
+                    query+="*";
+            }
+
+            if (query.equals("*"))
+        		continue;
+            
+            if (max==-1||max>mymax)
+                max=mymax;
+
             Collection<User> foundUsers = new ArrayList<User>();
 
-            if (userManager != null && query.length() > 0 && !query.equals(NAMESPACE_JABBER_IQ_SEARCH)) {
-                if (max >= 0) {
-                    foundUsers.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), query, startIndex, max));
-                } else {
-                    foundUsers.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), query));
-                }
-            }
+            if (userManager != null && query.length() > 0 && !query.equals(NAMESPACE_JABBER_IQ_SEARCH)&& !field.equals("Nickname"))
+            {
+                if (query.startsWith("*."))
+                {
+                    Collection<User> tmp = new ArrayList<User>();
+                    for (int n=0;n<26;n++)
+                    {
+                        String first = Character.toString((char)((int)n+((int)97)));
+                        String tmpquery=first+"*"+query.substring(2);
+                        Log.debug("Starte Suche: "+field+"="+tmpquery+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        if (max >= 0)
+                        {
+                            tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), tmpquery, startIndex, max));    	                	
+                        }
+                        else
+                        {
+                            tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), tmpquery));
+                        }
+                    }
 
-            // occasionally a null User is returned so filter them out
-            for (User user : foundUsers) {
-                if (user != null) {
-                    users.add(user);
+                    if (max >= 0)
+                    {
+                        Log.debug("Starte Suche: "+field+"="+"ä*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ä*"+query.substring(2), startIndex, max));
+                        Log.debug("Starte Suche: "+field+"="+"ö*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ö*"+query.substring(2), startIndex, max));
+                        Log.debug("Starte Suche: "+field+"="+"ü*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ü*"+query.substring(2), startIndex, max));
+                    }
+                    else
+                    {
+                        Log.debug("Starte Suche: "+field+"="+"ä*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ä*"+query.substring(2)));
+                        Log.debug("Starte Suche: "+field+"="+"ö*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ö*"+query.substring(2)));
+                        Log.debug("Starte Suche: "+field+"="+"ü*"+query.substring(2)+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                        tmp.addAll(userManager.findUsers(new HashSet<String>(Arrays.asList(field)), "ü*"+query.substring(2)));
+                    }
+
+                    Log.info("Ergebnisse: "+String.valueOf(tmp.size()));
+                    foundUsers.addAll(tmp);
+
+                }
+                else
+                {
+                    Log.info("Starte Suche: "+field+"="+query+" startIndex="+String.valueOf(startIndex)+" max="+String.valueOf(max));
+                    if (max >= 0) {
+                        try
+                        {
+
+                        /*	if (JiveGlobals.getProperty("ldap.searchFields", null)==null)
+                            {*/
+
+                                Collection<User> tmp = userManager.findUsers(new HashSet<String>(Arrays.asList(field)), query, startIndex, max);
+                                Log.info("Ergebnisse: "+String.valueOf(tmp.size()));
+                                foundUsers.addAll(tmp);
+                          /*}
+                            else
+                            {
+                                Collection<User> tmp = userManager.findUsers(userManager.getSearchFields(), query, startIndex, max);
+                                Log.info("Ergebnisse: "+String.valueOf(tmp.size()));
+                                foundUsers.addAll(tmp);
+                            }*/
+                        }
+                        catch (IllegalArgumentException ie)
+                        {
+                            Log.error("FEHLER",ie);
+                            Log.info("Available Searchfields: ");
+                            for (String str : userManager.getSearchFields())
+                            {
+                                Log.info("searchField: "+str);
+                            }
+                        }
+                    }
+                    else 
+                    {
+                        try
+                        {
+                        /*  if (JiveGlobals.getProperty("ldap.searchFields", null)==null)
+                            {*/
+                            Collection<User> tmp = userManager.findUsers(new HashSet<String>(Arrays.asList(field)), query);
+                            Log.info("Ergebnisse: "+String.valueOf(tmp.size()));
+                            foundUsers.addAll(tmp);
+                           /*}
+                             else
+                             {
+                                Collection<User> tmp = userManager.findUsers(userManager.getSearchFields(), query);
+                                Log.info("Ergebnisse: "+String.valueOf(tmp.size()));
+                                foundUsers.addAll(tmp);
+                             }*/
+                        }
+                        catch (IllegalArgumentException ie)
+                        {
+                            Log.error("FEHLER",ie);
+                            Log.info("Available Searchfields: ");
+                            for (String str : userManager.getSearchFields())
+                            {
+                                Log.info("searchField: "+str);
+                            }
+                        }
+                    }
+                }
+                // occasionally a null User is returned so filter them out
+                for (User user : foundUsers) {
+                    if (user != null) {
+                        users.add(user);
+                    }
                 }
             }
+            else
+                if (query!=null&&field!=null&&field.equals("Nickname"))
+                {
+                    ArrayList<NickAddrType> listnick = getRufnamen(query);
+                    String xmppdomain = XMPPServer.getInstance().getServerInfo().getXMPPDomain();
+                    for (NickAddrType tmp : listnick)
+                    {
+                        boolean found=false;
+                        for (User user : users)
+                        {
+                            String jid = user.getUsername()+"@"+xmppdomain;
+                            if (user != null&&jid.equalsIgnoreCase(tmp.addr))
+                            {
+                                found=true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                        {
+                            try {
+                                users.add(userManager.getUser(tmp.addr.substring(0,tmp.addr.indexOf("@"))));
+                                Log.debug("USER "+tmp.addr.substring(0,tmp.addr.indexOf("@"))+" über Rufnamen gefunden!");
+                            } catch (UserNotFoundException e) {
+                                Log.error("USER "+tmp.addr.substring(0,tmp.addr.indexOf("@"))+" nicht gefunden!");
+                            }
+                        }
+                    }
+                }
         }
         return users;
     }
@@ -813,6 +1101,8 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
                         (user.isEmailVisible() ? removeNull(user.getEmail()) : ""));
             }
 
+            item.put("Nickname",getRufnameFromUser(user));
+
             searchResults.addItemFields(item);
         }
 
@@ -821,6 +1111,41 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
         reply.add(searchResults.getElement());
 
         return replyPacket;
+    }
+
+    public static String getRufnameFromUser(User user)
+    {
+        Log.info("Lade Rufnamen für "+user.getUsername());
+        PEPServiceManager pepServiceMgr = XMPPServer.getInstance().getIQPEPHandler().getServiceManager();
+
+        PEPService pep = pepServiceMgr.getPEPService(user.getUsername()+"@"+XMPPServer.getInstance().getServerInfo().getXMPPDomain());
+
+        if (pep!=null)
+        {
+            Node node = pep.getNode("http://jabber.org/protocol/nick");
+
+            if (node!=null)
+            {
+                PublishedItem item = node.getPublishedItem("current");
+                if (item!=null)
+                {
+                    String xml = item.getPayloadXML();
+                    String result = null;
+                    try {
+                        Document doc = DocumentHelper.parseText(xml);
+                        result=doc.getRootElement().getText();
+                        Log.info("Rufname="+result);
+                        return result;
+                    } catch (Exception e) {
+                        result=xml.replace("<nick xmlns=\"http://jabber.org/protocol/nick\">", "").replace("</nick>", "");
+                        Log.info("Rufname="+result);
+                        return result;
+                    }
+                }
+            }
+        }
+
+        return "";
     }
 
     private Map<String, String> getLdapAttributes(String username, String[] attrlist) {
@@ -969,6 +1294,7 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
         // by providing our own searching.
         try {
             searchFields = new ArrayList<String>(userManager.getSearchFields());
+            searchFields.add("Nickname");
         } catch (UnsupportedOperationException uoe) {
             // Use a SearchPluginUserManager instead.
             searchFields = getSearchPluginUserManagerSearchFields();
@@ -1119,6 +1445,6 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
      * @return the collection of field names that can be used to search.
      */
     public Collection<String> getSearchPluginUserManagerSearchFields() {
-        return Arrays.asList("Username", "Name", "Email");
+        return Arrays.asList("Username", "Nickname", "Name", "Email");
     }
 }
