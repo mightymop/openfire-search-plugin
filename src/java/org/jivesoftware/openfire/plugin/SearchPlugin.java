@@ -20,6 +20,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,7 +29,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+
+import javax.naming.directory.Attributes;
+import javax.naming.directory.DirContext;
+import javax.naming.ldap.Rdn;
+
 import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.TreeMap;
 
 import org.dom4j.DocumentHelper;
@@ -42,8 +49,10 @@ import org.jivesoftware.openfire.disco.IQDiscoInfoHandler;
 import org.jivesoftware.openfire.disco.IQDiscoItemsHandler;
 import org.jivesoftware.openfire.group.Group;
 import org.jivesoftware.openfire.group.GroupManager;
+import org.jivesoftware.openfire.ldap.LdapManager;
 import org.jivesoftware.openfire.user.User;
 import org.jivesoftware.openfire.user.UserManager;
+import org.jivesoftware.util.Base64;
 import org.jivesoftware.util.JiveGlobals;
 import org.jivesoftware.util.LocaleUtils;
 import org.jivesoftware.util.PropertyEventDispatcher;
@@ -402,7 +411,15 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
             field.setVariable(searchField);
             field.setType(FormField.Type.boolean_type);
             field.addValue("1");
-            field.setLabel(LocaleUtils.getLocalizedString("advance.user.search." + searchField.toLowerCase(), "search"));
+            String strlabel = JiveGlobals.getProperty("advance.user.search." + searchField.toLowerCase(), null);
+            if (strlabel!=null)
+            {
+                field.setLabel(strlabel);
+            }
+            else
+            {
+                field.setLabel(LocaleUtils.getLocalizedString("advance.user.search." + searchField.toLowerCase(), "search"));
+            }
             field.setRequired(false);
         }
 
@@ -735,8 +752,16 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
         searchResults.addReportedField("jid", "JID", FormField.Type.jid_single);
 
         for (final String fieldName : getFilteredSearchFields()) {
-            searchResults.addReportedField(fieldName,
+            String strlabel = JiveGlobals.getProperty("advance.user.search." + fieldName.toLowerCase(), null);
+            if (strlabel!=null)
+            {
+                searchResults.addReportedField(fieldName,strlabel, FormField.Type.text_single);
+            }
+            else
+            {
+                searchResults.addReportedField(fieldName,
                     LocaleUtils.getLocalizedString("advance.user.search." + fieldName.toLowerCase(), "search"), FormField.Type.text_single);
+            }
         }
 
         for (final User user : users) {
@@ -747,11 +772,46 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
 
             item.put(LocaleUtils.getLocalizedString("advance.user.search.username", "search"), username);
 
-            item.put(LocaleUtils.getLocalizedString("advance.user.search.name", "search"),
-                    (user.isNameVisible() ? removeNull(user.getName()) : ""));
+            String ldapsearchfields = JiveGlobals.getProperty("ldap.searchFields",null);
+            if (ldapsearchfields!=null)
+            {
+                HashMap<String,String> fields = new HashMap<String,String>();
+                ArrayList<String> attrList = new ArrayList<String>();
+                try
+                {
+                    for (StringTokenizer i=new StringTokenizer(ldapsearchfields, ","); i.hasMoreTokens();)
+                    {
+                        String[] field = i.nextToken().split("/");
+                        fields.put(field[0], field[1]);
+                        attrList.add(field[1]);
+                    }
+                    Log.debug("fill fields: "+fields.toString());
+                }
+                catch (Exception e)
+                {
+                    fields=null;
+                    Log.error("Error parsing LDAP search fields: " + ldapsearchfields, e);
+                }
 
-            item.put(LocaleUtils.getLocalizedString("advance.user.search.email", "search"),
-                    (user.isEmailVisible() ? removeNull(user.getEmail()) : ""));
+                if (fields!=null)
+                {
+                    Map<String,String> listattr = getLdapAttributes(username,attrList.toArray(new String[attrList.size()]));
+
+                    for (String str : userManager.getSearchFields())
+                    {
+                        Log.debug("ATTR: "+fields.get(str)+" = "+listattr.get(fields.get(str)));
+                        item.put(str,  listattr.get(fields.get(str)));
+                    }
+                }
+            }
+            else
+            {
+                item.put(LocaleUtils.getLocalizedString("advance.user.search.name", "search"),
+                        (user.isNameVisible() ? removeNull(user.getName()) : ""));
+
+                item.put(LocaleUtils.getLocalizedString("advance.user.search.email", "search"),
+                        (user.isEmailVisible() ? removeNull(user.getEmail()) : ""));
+            }
 
             searchResults.addItemFields(item);
         }
@@ -761,6 +821,58 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
         reply.add(searchResults.getElement());
 
         return replyPacket;
+    }
+
+    private Map<String, String> getLdapAttributes(String username, String[] attrlist) {
+        // Un-escape username
+        username = JID.unescapeNode(username);
+        Map<String, String> map = new HashMap<>();
+
+        DirContext ctx = null;
+
+        LdapManager manager = LdapManager.getInstance();
+        try {
+            Log.debug("find userDN from "+username);
+            Rdn[] userRDN = manager.findUserRDN(username);
+
+            ctx = manager.getContext(manager.getUsersBaseDN(username));
+            Attributes attrs = ctx.getAttributes(LdapManager.escapeForJNDI(userRDN), attrlist);
+
+            for (String attribute : attrlist) {
+                javax.naming.directory.Attribute attr = attrs.get(attribute);
+                String value;
+                if (attr == null) {
+                    Log.debug("No ldap value found for attribute '" + attribute + "'");
+                    value = "";
+                }
+                else {
+                    Object ob = attrs.get(attribute).get();
+                    Log.debug("Found attribute "+attribute+" of type: "+ob.getClass());
+                    if(ob instanceof String) {
+                        value = (String)ob;
+                    } else {
+                        value = Base64.encodeBytes((byte[])ob);
+                    }
+                }
+                Log.debug("Ldap attribute '" + attribute + "'=>'" + value + "'");
+                map.put(attribute, value);
+            }
+            return map;
+        }
+        catch (Exception e) {
+            Log.error(e.getMessage(), e);
+            return Collections.emptyMap();
+        }
+        finally {
+            try {
+                if (ctx != null) {
+                    ctx.close();
+                }
+            }
+            catch (Exception e) {
+                // Ignore.
+            }
+        }
     }
 
     /**
