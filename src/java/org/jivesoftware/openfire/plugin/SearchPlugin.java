@@ -780,10 +780,13 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
             }
 
             if (query.equals("*"))
-        		continue;
-            
-            if (max==-1||max>mymax)
-                max=mymax;
+                continue;
+
+            if (mymax>0)
+            {
+                if (max==-1||max>mymax)
+                    max=mymax;
+            }
 
             Collection<User> foundUsers = new ArrayList<User>();
 
@@ -925,6 +928,7 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
                     }
                 }
         }
+
         return users;
     }
 
@@ -1032,7 +1036,19 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
      *            the IQ packet sent by the client
      * @return the iq packet that contains the search results
      */
-    private IQ replyDataFormResult(Collection<User> users, IQ packet) {
+    private IQ replyDataFormResult(Collection<User> userlist, IQ packet) {
+        
+        // Sorting HashSet using List 
+        Log.info("Sortiere Ergebnisse...");
+        List<User> users = new ArrayList<User>(userlist); 
+        Collections.sort(users, new Comparator<User>() {
+
+            @Override
+            public int compare(User arg0, User arg1) {
+                return arg0.getUsername().compareTo(arg1.getUsername());
+            }
+        });
+        
         final DataForm searchResults = new DataForm(DataForm.Type.result);
 
         searchResults.addField("FORM_TYPE", null, FormField.Type.hidden);
@@ -1209,7 +1225,18 @@ public class SearchPlugin implements Component, Plugin, PropertyEventListener {
      *            the IQ packet sent by the client
      * @return the iq packet that contains the search results
      */
-    private IQ replyNonDataFormResult(Collection<User> users, IQ packet) {
+    private IQ replyNonDataFormResult(Collection<User> userlist, IQ packet) {
+        
+        Log.info("Sortiere Ergebnisse...");
+        List<User> users = new ArrayList<User>(userlist); 
+        Collections.sort(users, new Comparator<User>() {
+
+            @Override
+            public int compare(User arg0, User arg1) {
+                return arg0.getUsername().compareTo(arg1.getUsername());
+            }
+        });
+
         IQ replyPacket = IQ.createResultIQ(packet);
         Element replyQuery = replyPacket.setChildElement("query", NAMESPACE_JABBER_IQ_SEARCH);
 
