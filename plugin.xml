@@ -2,12 +2,12 @@
 
 <plugin>
     <class>org.jivesoftware.openfire.plugin.SearchPlugin</class>
-    <name>Search</name>
-    <description>Provides support for Jabber Search (XEP-0055)</description>
-    <author>Ryan Graham</author>
+  <name>${project.name}</name>
+    <description>${project.description}</description>
+    <author>Dir ZS IKT C44</author>
     <version>${project.version}</version>
-    <date>2025-06-25</date>
-    <minServerVersion>4.4.0</minServerVersion>
+    <date>2025-07-02</date>
+    <minServerVersion>5.0.0</minServerVersion>
     <minJavaVersion>11</minJavaVersion>
 
     <adminconsole>
