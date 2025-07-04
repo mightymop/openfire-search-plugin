@@ -7,6 +7,7 @@
         <version>4.4.0</version>
     </parent>
     <groupId>org.igniterealtime.openfire.plugins</groupId>
+    <description>Plugin for XEP-0055 (Search in XMPP).</description>
     <artifactId>search</artifactId>
     <version>1.7.5.1</version>
     <name>Search</name>
