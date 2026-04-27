@@ -4,13 +4,34 @@
     <parent>
         <artifactId>plugins</artifactId>
         <groupId>org.igniterealtime.openfire</groupId>
-        <version>4.4.0</version>
+        <version>5.0.0</version>
     </parent>
     <groupId>org.igniterealtime.openfire.plugins</groupId>
     <description>Plugin for XEP-0055 (Search in XMPP).</description>
     <artifactId>search</artifactId>
-    <version>1.7.5.1</version>
+    <version>1.8.0</version>
     <name>Search</name>
+    <description>Provides support for Jabber Search (XEP-0055)</description>
+    <issueManagement>
+        <system>github</system>
+        <url>https://github.com/igniterealtime/openfire-search-plugin/issues</url>
+    </issueManagement>
+    <scm>
+        <connection>scm:git:https://github.com/igniterealtime/openfire-search-plugin.git</connection>
+        <developerConnection>scm:git:git@github.com:igniterealtime/openfire-search-plugin.git</developerConnection>
+        <url>https://github.com/igniterealtime/openfire-search-plugin</url>
+    </scm>
+    <developers>
+        <developer>
+            <name>Ryan Graham</name>
+        </developer>
+    </developers>
+    <licenses>
+        <license>
+            <name>Apache-2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
 
     <repositories>
         <!-- Where we obtain dependencies. -->
@@ -23,7 +44,6 @@
             </snapshots>
         </repository>
     </repositories>
-
     <build>
         <sourceDirectory>src/java</sourceDirectory>
         <plugins>
@@ -32,17 +52,8 @@
             </plugin>
             <!-- Compiles the Openfire Admin Console JSP pages. -->
             <plugin>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-jspc-maven-plugin</artifactId>
-                <!-- Force the Openfire 4.2.x compatible version of JSP -->
-                <version>9.2.14.v20151106</version>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.igniterealtime.openfire</groupId>
-                        <artifactId>xmppserver</artifactId>
-                        <version>${openfire.version}</version>
-                    </dependency>
-                </dependencies>
+                <groupId>org.eclipse.jetty.ee8</groupId>
+                <artifactId>jetty-ee8-jspc-maven-plugin</artifactId>
             </plugin>
         </plugins>
     </build>

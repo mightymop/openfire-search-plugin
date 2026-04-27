@@ -5,8 +5,9 @@
   <name>${project.name}</name>
     <description>${project.description}</description>
     <author>Dir ZS IKT C44</author>
+    <licenseType>apache</licenseType>
     <version>${project.version}</version>
-    <date>2025-07-02</date>
+    <date>2025-09-25</date>
     <minServerVersion>5.0.0</minServerVersion>
     <minJavaVersion>11</minJavaVersion>
 
